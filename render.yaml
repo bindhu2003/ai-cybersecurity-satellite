@@ -1,4 +1,7 @@
 runtime: python
 pythonVersion: 3.10
-buildCommand: pip install -r requirements.txt
+buildCommand: |
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  source $HOME/.cargo/env
+  pip install -r requirements.txt
 startCommand: python src/api.py
