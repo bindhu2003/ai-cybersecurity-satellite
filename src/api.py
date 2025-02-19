@@ -1,91 +1,100 @@
 import os
-from flask import Flask, request, jsonify
+import json
+import logging
 import joblib
-import numpy as np
 import jwt
 import datetime
-from functools import wraps
+from flask import Flask, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-import logging
+from werkzeug.security import generate_password_hash, check_password_hash
 
+# Initialize Flask App
 app = Flask(__name__)
 
-# Use Render's expected PORT
-PORT = int(os.environ.get("PORT", 10000))  # Default to 10000 if not set
-
-app.config["SECRET_KEY"] = "your_secret_key"
-
-# Rate Limiter
-limiter = Limiter(get_remote_address, app=app, default_limits=["10 per minute"])
+# Secret key for JWT authentication
+SECRET_KEY = "supersecretkey"
+app.config["SECRET_KEY"] = SECRET_KEY
 
 # Load trained model and scaler
 model = joblib.load("model/intrusion_model.pkl")
 scaler = joblib.load("model/scaler.pkl")
 feature_names = joblib.load("model/feature_names.pkl")
 
-# Logging Setup
-logging.basicConfig(filename="intrusion_logs.txt", level=logging.INFO, format="%(asctime)s - %(message)s")
+# Configure Rate Limiting (File-based storage)
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    storage_uri="memory://"  # Use "filesystem://rate_limit_storage" for persistence
+)
 
-@app.route("/")
+# Setup logging for intrusion detection
+LOG_FILE = "intrusion_logs.txt"
+logging.basicConfig(filename=LOG_FILE, level=logging.INFO, format="%(asctime)s - %(message)s")
+
+# Dummy user for authentication
+USER_DATA = {
+    "admin": generate_password_hash("password123")  # Username: admin, Password: password123
+}
+
+# ----------------------------- #
+#         ROUTES
+# ----------------------------- #
+
+# ✅ Homepage Route
+@app.route("/", methods=["GET"])
 def home():
-    return jsonify({"message": "Welcome to AI Cybersecurity API! Use /predict to make requests."})
+    return jsonify({"message": "Welcome to AI-Powered Cybersecurity API!"})
 
 
-# ✅ **JWT Authentication Decorator**
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = request.headers.get("x-access-token")
-        if not token:
-            return jsonify({"error": "Token is missing!"}), 401
-
-        try:
-            data = jwt.decode(token, app.config["SECRET_KEY"], algorithms=["HS256"])
-        except jwt.ExpiredSignatureError:
-            return jsonify({"error": "Token has expired!"}), 401
-        except jwt.InvalidTokenError:
-            return jsonify({"error": "Invalid token!"}), 401
-
-        return f(*args, **kwargs)
-
-    return decorated
-
-
-# ✅ **Generate JWT Token**
+# ✅ User Login (Generates JWT Token)
 @app.route("/login", methods=["POST"])
 def login():
-    auth = request.json
-    if auth and auth.get("username") == "admin" and auth.get("password") == "password":
+    data = request.json
+    username = data.get("username")
+    password = data.get("password")
+
+    if username in USER_DATA and check_password_hash(USER_DATA[username], password):
         token = jwt.encode(
-            {"user": auth["username"], "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)},
-            app.config["SECRET_KEY"],
-            algorithm="HS256",
+            {"user": username, "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)},
+            app.config["SECRET_KEY"], algorithm="HS256"
         )
         return jsonify({"token": token})
-    return jsonify({"error": "Invalid credentials"}), 401
+    return jsonify({"message": "Invalid credentials"}), 401
 
 
-# ✅ **Intrusion Detection Prediction Route**
+# ✅ Predict Intrusion (JWT Required)
 @app.route("/predict", methods=["POST"])
-@token_required
-@limiter.limit("5 per minute")
+@limiter.limit("5 per minute")  # Limit requests to prevent abuse
 def predict():
+    token = request.headers.get("Authorization")
+    if not token:
+        return jsonify({"message": "Token is missing!"}), 401
+
+    try:
+        jwt.decode(token, app.config["SECRET_KEY"], algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        return jsonify({"message": "Token expired!"}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"message": "Invalid token!"}), 401
+
     try:
         data = request.json
-        input_data = np.array([data[feature] for feature in feature_names]).reshape(1, -1)
-        input_scaled = scaler.transform(input_data)
+        input_features = [data.get(feature, 0) for feature in feature_names]
+        input_scaled = scaler.transform([input_features])
         prediction = model.predict(input_scaled)[0]
         
-        # Log Intrusion Events
-        logging.info(f"Intrusion Detected: {bool(prediction)}, Data: {data}")
+        intrusion_detected = bool(prediction)
+        logging.info(f"Intrusion Detected: {intrusion_detected}, Data: {data}")
 
-        return jsonify({"intrusion_detected": bool(prediction)})
-
+        return jsonify({"intrusion_detected": intrusion_detected})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
 
-# ✅ **Run Flask App**
+# Run Flask App (Local)
+import os
+
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=PORT)
+    port = int(os.environ.get("PORT", 10000))  # Default to 10000
+    app.run(host="0.0.0.0", port=port)
