@@ -1,3 +1,4 @@
+import os
 from flask import Flask, request, jsonify
 import joblib
 import numpy as np
@@ -8,13 +9,14 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import logging
 
-# Initialize Flask App
 app = Flask(__name__)
 
-# Secret key for JWT authentication
+# Use Render's expected PORT
+PORT = int(os.environ.get("PORT", 10000))  # Default to 10000 if not set
+
 app.config["SECRET_KEY"] = "your_secret_key"
 
-# Initialize Rate Limiting
+# Rate Limiter
 limiter = Limiter(get_remote_address, app=app, default_limits=["10 per minute"])
 
 # Load trained model and scaler
@@ -22,10 +24,9 @@ model = joblib.load("model/intrusion_model.pkl")
 scaler = joblib.load("model/scaler.pkl")
 feature_names = joblib.load("model/feature_names.pkl")
 
-# Setup logging
+# Logging Setup
 logging.basicConfig(filename="intrusion_logs.txt", level=logging.INFO, format="%(asctime)s - %(message)s")
 
-# ✅ **Homepage Route**
 @app.route("/")
 def home():
     return jsonify({"message": "Welcome to AI Cybersecurity API! Use /predict to make requests."})
@@ -87,4 +88,4 @@ def predict():
 
 # ✅ **Run Flask App**
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=True, host="0.0.0.0", port=PORT)
