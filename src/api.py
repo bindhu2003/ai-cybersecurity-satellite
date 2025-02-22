@@ -2,8 +2,8 @@ import os
 import json
 import logging
 import joblib
+import jwt
 import datetime
-import jwt as pyjwt  # ✅ Fix for JWT encoding error
 from flask import Flask, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -17,18 +17,15 @@ SECRET_KEY = "supersecretkey"
 app.config["SECRET_KEY"] = SECRET_KEY
 
 # Load trained model and scaler
-try:
-    model = joblib.load("model/intrusion_model.pkl")
-    scaler = joblib.load("model/scaler.pkl")
-    feature_names = joblib.load("model/feature_names.pkl")
-except Exception as e:
-    print(f"⚠️ Model loading error: {e}")
+model = joblib.load("model/intrusion_model.pkl")
+scaler = joblib.load("model/scaler.pkl")
+feature_names = joblib.load("model/feature_names.pkl")
 
-# Configure Rate Limiting (Using in-memory storage)
+# Configure Rate Limiting (File-based storage)
 limiter = Limiter(
     get_remote_address,
     app=app,
-    storage_uri="memory://"  # Use "filesystem://rate_limit_storage" for persistent storage
+    storage_uri="memory://"  # Use "filesystem://rate_limit_storage" for persistence
 )
 
 # Setup logging for intrusion detection
@@ -53,47 +50,36 @@ def home():
 # ✅ User Login (Generates JWT Token)
 @app.route("/login", methods=["POST"])
 def login():
-    try:
-        data = request.json
-        if not data:
-            return jsonify({"message": "Missing JSON body"}), 400
+    data = request.json
+    username = data.get("username")
+    password = data.get("password")
 
-        username = data.get("username")
-        password = data.get("password")
-
-        if username in USER_DATA and check_password_hash(USER_DATA[username], password):
-            token = pyjwt.encode(
-                {"user": username, "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)},
-                app.config["SECRET_KEY"], algorithm="HS256"
-            )
-            return jsonify({"token": token})
-        return jsonify({"message": "Invalid credentials"}), 401
-    
-    except Exception as e:
-        logging.error(f"Error in login: {str(e)}")
-        return jsonify({"error": "Internal Server Error"}), 500
+    if username in USER_DATA and check_password_hash(USER_DATA[username], password):
+        token = jwt.encode(
+            {"user": username, "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)},
+            app.config["SECRET_KEY"], algorithm="HS256"
+        )
+        return jsonify({"token": token})
+    return jsonify({"message": "Invalid credentials"}), 401
 
 
 # ✅ Predict Intrusion (JWT Required)
 @app.route("/predict", methods=["POST"])
-@limiter.limit("5 per minute")  # ✅ Prevent abuse by limiting requests
+@limiter.limit("5 per minute")  # Limit requests to prevent abuse
 def predict():
     token = request.headers.get("Authorization")
     if not token:
         return jsonify({"message": "Token is missing!"}), 401
 
     try:
-        pyjwt.decode(token, app.config["SECRET_KEY"], algorithms=["HS256"])
-    except pyjwt.ExpiredSignatureError:
+        jwt.decode(token, app.config["SECRET_KEY"], algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
         return jsonify({"message": "Token expired!"}), 401
-    except pyjwt.InvalidTokenError:
+    except jwt.InvalidTokenError:
         return jsonify({"message": "Invalid token!"}), 401
 
     try:
         data = request.json
-        if not data:
-            return jsonify({"message": "Missing JSON body"}), 400
-
         input_features = [data.get(feature, 0) for feature in feature_names]
         input_scaled = scaler.transform([input_features])
         prediction = model.predict(input_scaled)[0]
@@ -103,11 +89,12 @@ def predict():
 
         return jsonify({"intrusion_detected": intrusion_detected})
     except Exception as e:
-        logging.error(f"Prediction error: {str(e)}")
-        return jsonify({"error": "Prediction failed"}), 400
+        return jsonify({"error": str(e)}), 400
 
 
-# Run Flask App (Local or Render Deployment)
+# Run Flask App (Local)
+import os
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))  # ✅ Render assigns a dynamic port
+    port = int(os.environ.get("PORT", 10000))  # Default to 10000
     app.run(host="0.0.0.0", port=port)
