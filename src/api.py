@@ -2,7 +2,7 @@ import os
 import json
 import logging
 import joblib
-import jwt
+import jwt as PyJWT
 import datetime
 from flask import Flask, request, jsonify
 from flask_limiter import Limiter
@@ -63,10 +63,11 @@ def login():
         if username in USER_DATA:
             print("User Found:", username)  # Debugging
             if check_password_hash(USER_DATA[username], password):
-                token = jwt.encode(
+                token = PyJWT.encode(
                     {"user": username, "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)},
                     app.config["SECRET_KEY"], algorithm="HS256"
                 )
+
                 print("Token Generated:", token)  # Debugging
                 return jsonify({"token": token})
             else:
