@@ -55,20 +55,30 @@ def home():
 def login():
     try:
         data = request.json
+        print("Received Data:", data)  # Debugging
+        
         username = data.get("username")
         password = data.get("password")
-
-        if username in USER_DATA and check_password_hash(USER_DATA[username], password):
-            token = jwt.encode(
-                {"user": username, "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)},
-                app.config["SECRET_KEY"], algorithm="HS256"
-            )
-            return jsonify({"token": token})
+        
+        if username in USER_DATA:
+            print("User Found:", username)  # Debugging
+            if check_password_hash(USER_DATA[username], password):
+                token = jwt.encode(
+                    {"user": username, "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)},
+                    app.config["SECRET_KEY"], algorithm="HS256"
+                )
+                print("Token Generated:", token)  # Debugging
+                return jsonify({"token": token})
+            else:
+                print("Invalid Password")  # Debugging
+        else:
+            print("User Not Found")  # Debugging
+        
         return jsonify({"message": "Invalid credentials"}), 401
     
     except Exception as e:
-        logging.error(f"Login Error: {str(e)}")
-        return jsonify({"error": "Internal Server Error"}), 500
+        print("Error in Login:", str(e))  # Debugging
+        return jsonify({"error": str(e)}), 500  # Sends actual error details
 
 
 # ✅ Predict Intrusion (JWT Required)
