@@ -34,7 +34,7 @@ logging.basicConfig(filename=LOG_FILE, level=logging.INFO, format="%(asctime)s -
 
 # Dummy user for authentication
 USER_DATA = {
-    "admin": generate_password_hash("password123")  # Username: admin, Password: password123
+    "user": generate_password_hash("majorproject")  # Username: admin, Password: password123
 }
 
 # ----------------------------- #
